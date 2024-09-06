@@ -35,12 +35,12 @@ source "qemu" "initialize" {
                       "<f10><wait>"
                     ]
   cpus             = "4"
-  disk_size        = "56000"
+  disk_size        = "64000"
   format           = "raw"
   headless         = "true"
   http_directory   = "http"
-  iso_checksum     = "sha256:5e38b55d57d94ff029719342357325ed3bda38fa80054f9330dc789cd2d43931"
-  iso_urls         = ["https://old-releases.ubuntu.com/releases/jammy/ubuntu-22.04.2-live-server-amd64.iso"]
+  iso_checksum     = "sha256:e240e4b801f7bb68c20d1356b60968ad0c33a41d00d828e74ceb3364a0317be9"
+  iso_urls         = ["https://releases.ubuntu.com/noble/ubuntu-24.04.1-live-server-amd64.iso"]
   memory           = "8192"
   output_directory = "disk-image"
   qemu_binary      = "/usr/bin/qemu-system-x86_64"
@@ -63,7 +63,22 @@ build {
 
   provisioner "file" {
     destination = "/home/gem5/"
+    source      = "files/load_amdgpu.sh"
+  }
+
+  provisioner "file" {
+    destination = "/home/gem5/"
     source      = "files/serial-getty@.service"
+  }
+
+  provisioner "file" {
+    destination = "/home/gem5/"
+    source      = "files/gem5_amdgpu_acpi/gem5_amdgpu_acpi.c"
+  }
+
+  provisioner "file" {
+    destination = "/home/gem5/"
+    source      = "files/gem5_amdgpu_acpi/Makefile"
   }
 
   provisioner "shell" {
