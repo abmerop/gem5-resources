@@ -14,7 +14,7 @@ set -e
 # OS: Linux
 # Package: Pip
 # Language: Python
-# Compute Platform: ROCm 7.14
+# Compute Platform: ROCm 10.0
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update && sudo apt-get install -y python3-pip
 
@@ -24,7 +24,7 @@ export TMPDIR=/root/pip-tmp
 mkdir -p $TMPDIR
 
 pip install --break-system-packages --no-cache-dir --resume-retries 5 torch torchvision \
-    --index-url https://download.pytorch.org/whl/rocm7.14
+    --index-url https://download.pytorch.org/whl/rocm10.0
 
 rm -rf $TMPDIR
 

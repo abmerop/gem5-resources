@@ -13,12 +13,12 @@ packer {
 
 variable "rocm_image_name" {
   type    = string
-  default = "x86-ubuntu-rocm100"
+  default = "x86-ubuntu-rocm101"
 }
 
 variable "pytorch_image_name" {
   type    = string
-  default = "x86-ubuntu-pytorch-r714"
+  default = "x86-ubuntu-pytorch-rocm100"
 }
 
 variable "rocm_disk_size" {
@@ -28,7 +28,7 @@ variable "rocm_disk_size" {
 
 variable "pytorch_disk_size" {
   type    = string
-  default = "34000"
+  default = "40000"
 }
 
 variable "ssh_password" {
@@ -146,7 +146,7 @@ build {
 
   provisioner "file" {
     source      = "/home/gem5/vmlinux-gpu-ml"
-    destination = "vmlinux-rocm100"
+    destination = "vmlinux-rocm101"
     direction   = "download"
   }
 
@@ -204,7 +204,7 @@ build {
 
   provisioner "file" {
     source      = "/home/gem5/vmlinux-gpu-ml"
-    destination = "vmlinux-pytorch-rocm714"
+    destination = "vmlinux-pytorch-rocm100"
     direction   = "download"
   }
 

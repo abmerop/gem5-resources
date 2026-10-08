@@ -7,8 +7,8 @@ authors:
 This document provides instructions to create the `x86-ubuntu-gpu-ml` disk images.
 Two images are produced from a single Packer template, both written to the common `disk-image/` directory:
 
-- **ROCm image** (`disk-image/x86-ubuntu-rocm100`, 12 GB) — Ubuntu + ROCm 10.0
-- **PyTorch image** (`disk-image/x86-ubuntu-pytorch-r714`, 24 GB) — Ubuntu + PyTorch with bundled ROCm 7.14.
+- **ROCm image** (`disk-image/x86-ubuntu-rocm101`, 12 GB) — Ubuntu + ROCm 10.1
+- **PyTorch image** (`disk-image/x86-ubuntu-pytorch-rocm100`, 40 GB) — Ubuntu + PyTorch with bundled ROCm 10.0.
 
 Documentation and files here are adapted from the x86-ubuntu image by Harshil Patel and Jason Lowe-Power.
 
@@ -23,7 +23,7 @@ The provisioner scripts are layered:
 | Script | Purpose |
 |--------|---------|
 | `scripts/base-install.sh` | Common to both images: apt packages, gem5-bridge, kernel install and extraction, amdgpu discovery file setup, gem5 auto-login |
-| `scripts/rocm-install.sh` | ROCm-only: registers ROCm apt repos and installs `amdrocm10.0-gfx950` |
+| `scripts/rocm-install.sh` | ROCm-only: registers ROCm apt repos and installs `amdrocm10.1-gfx950` |
 | `scripts/pytorch-install.sh` | PyTorch-only: pip-installs `torch` and `torchvision` with bundled ROCm |
 
 Each image build runs `base-install.sh` followed by its variant script.
@@ -54,8 +54,8 @@ See [Troubleshooting](#troubleshooting) for VNC monitoring.
 
 | Image | Disk image path | Kernel path |
 |-------|----------------|-------------|
-| ROCm | `disk-image/x86-ubuntu-rocm100` | `vmlinux-rocm100` |
-| PyTorch | `disk-image/x86-ubuntu-pytorch-r714` | `vmlinux-pytorch-r714` |
+| ROCm | `disk-image/x86-ubuntu-rocm101` | `vmlinux-rocm101` |
+| PyTorch | `disk-image/x86-ubuntu-pytorch-rocm100` | `vmlinux-pytorch-rocm100` |
 
 You **must** pair each disk image with its matching extracted kernel when running gem5.
 The amdgpu DKMS driver is compiled against the pinned kernel at build time; mixing kernels and images will fail.
@@ -66,17 +66,17 @@ Mount a disk image to inspect or test changes:
 
 ```sh
 mkdir mount
-sudo mount -o loop,offset=1048576 disk-image/x86-ubuntu-rocm100 mount
+sudo mount -o loop,offset=1048576 disk-image/x86-ubuntu-rocm101 mount
 # or
-sudo mount -o loop,offset=1048576 disk-image/x86-ubuntu-pytorch-r714 mount
+sudo mount -o loop,offset=1048576 disk-image/x86-ubuntu-pytorch-rocm100 mount
 ```
 
 Mount a disk image to install packages (e.g., using apt):
 
 ```sh
-sudo systemd-nspawn -i disk-image/x86-ubuntu-rocm100
+sudo systemd-nspawn -i disk-image/x86-ubuntu-rocm101
 or
-sudo systemd-nspawn -i disk-image/x86-ubuntu-pytorch-r714
+sudo systemd-nspawn -i disk-image/x86-ubuntu-pytorch-rocm100
 ```
 
 Once you have tested your changes, add them to the appropriate script:
