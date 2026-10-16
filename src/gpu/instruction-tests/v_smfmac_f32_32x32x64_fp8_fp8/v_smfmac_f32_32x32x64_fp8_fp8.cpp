@@ -1,0 +1,155 @@
+/*
+ * HIP test for v_smfmac_f32_32x32x64_fp8_fp8 (sparse MFMA, fp8 A / fp8 B, f32
+ * accumulator, gfx950).
+ *
+ *   D.f32 = A_sparse.fp8 * B.fp8 + C.f32   (4:2 structured sparsity, K=64)
+ *
+ * Operand register layout (per wavefront, 64 lanes), from llvm-mc -mcpu=gfx950:
+ *   v_smfmac_f32_32x32x64_fp8_fp8 a[0:15], v[0:3], v[4:11], v16
+ *     SRC0 (A, sparse fp8): 4 VGPRs = 16 packed fp8 per lane
+ *     SRC1 (B, dense  fp8): 8 VGPRs = 32 packed fp8 per lane
+ *     SRC2 (index)        : 1 VGPR  = 4:2 sparsity index
+ *     C/D  (acc)          : 16 AGPRs of f32 per lane (32*32/64)
+ *
+ * Both fp8 operands are E4M3 (1.0 = 0x38).  Mapping-independent verification:
+ * every A and B fp8 byte = 1.0 and C = 0.  Each output accumulates exactly
+ * K/2 = 32 non-zero products, each 1.0*1.0, regardless of lane/register mapping
+ * and regardless of which positions the sparsity index selects (all B = 1.0).
+ * So every output = 32.0.
+ *
+ * Build (gfx950 only):
+ *   hipcc -O2 --offload-arch=gfx950 -o v_smfmac_f32_32x32x64_fp8_fp8 \
+ *         v_smfmac_f32_32x32x64_fp8_fp8.cpp
+ */
+
+#include <hip/hip_runtime.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+
+#define GPU_CHECK(cmd)                                                      \
+    do {                                                                    \
+        hipError_t e = (cmd);                                               \
+        if (e != hipSuccess) {                                              \
+            fprintf(stderr, "HIP error %s:%d '%s'\n", __FILE__, __LINE__,  \
+                    hipGetErrorString(e));                                   \
+            exit(1);                                                        \
+        }                                                                   \
+    } while (0)
+
+static const int CD_REGS = 16;   /* 32*32/64 f32 per lane */
+static const int GPRS_A  = 4;    /* 16 fp8 per lane (sparse A) */
+static const int GPRS_B  = 8;    /* 32 fp8 per lane (dense  B) */
+
+typedef __attribute__((ext_vector_type(4)))  int   int4_v;
+typedef __attribute__((ext_vector_type(8)))  int   int8_v;
+typedef __attribute__((ext_vector_type(16))) float float16_v;
+
+__global__ void
+smfmac_kernel(const uint32_t *a_in, const uint32_t *b_in,
+              const float *c_in, float *d_out, int num_waves)
+{
+    int wf_id = blockIdx.x;
+    int lane  = threadIdx.x;
+    if (wf_id >= num_waves)
+        return;
+
+    int base_a  = (wf_id * 64 + lane) * GPRS_A;
+    int base_b  = (wf_id * 64 + lane) * GPRS_B;
+    int base_cd = (wf_id * 64 + lane) * CD_REGS;
+
+    int4_v va;
+    for (int i = 0; i < GPRS_A; i++)
+        va[i] = (int)a_in[base_a + i];
+
+    int8_v vb;
+    for (int i = 0; i < GPRS_B; i++)
+        vb[i] = (int)b_in[base_b + i];
+
+    float16_v vc;
+    for (int i = 0; i < CD_REGS; i++)
+        vc[i] = c_in[base_cd + i];
+
+    uint32_t idx = 0x44444444u;   /* index-independent (all B == 1.0) */
+
+    __asm__ volatile(
+        "s_waitcnt vmcnt(0)\n\t"
+        "v_smfmac_f32_32x32x64_fp8_fp8 %0, %1, %2, %3\n\t"
+        : "+a"(vc)
+        : "v"(va), "v"(vb), "v"(idx));
+
+    for (int i = 0; i < CD_REGS; i++)
+        d_out[base_cd + i] = vc[i];
+}
+
+int
+main(void)
+{
+    const int num_waves = 4;
+    const int wf_size   = 64;
+    const int threads   = num_waves * wf_size;
+
+    size_t a_count  = (size_t)threads * GPRS_A;
+    size_t b_count  = (size_t)threads * GPRS_B;
+    size_t cd_count = (size_t)threads * CD_REGS;
+
+    uint32_t *h_a = (uint32_t *)calloc(a_count, sizeof(uint32_t));
+    uint32_t *h_b = (uint32_t *)calloc(b_count, sizeof(uint32_t));
+    float    *h_c = (float *)calloc(cd_count, sizeof(float));
+    float    *h_d = (float *)calloc(cd_count, sizeof(float));
+
+    /* fp8 1.0 = 0x38 -> 0x38383838 for both A and B. */
+    for (int t = 0; t < threads; t++) {
+        for (int r = 0; r < GPRS_A; r++) h_a[t * GPRS_A + r] = 0x38383838u;
+        for (int r = 0; r < GPRS_B; r++) h_b[t * GPRS_B + r] = 0x38383838u;
+        for (int r = 0; r < CD_REGS; r++) h_c[t * CD_REGS + r] = 0.0f;
+    }
+
+    uint32_t *d_a, *d_b;
+    float    *d_c, *d_d;
+    GPU_CHECK(hipMalloc(&d_a, a_count * sizeof(uint32_t)));
+    GPU_CHECK(hipMalloc(&d_b, b_count * sizeof(uint32_t)));
+    GPU_CHECK(hipMalloc(&d_c, cd_count * sizeof(float)));
+    GPU_CHECK(hipMalloc(&d_d, cd_count * sizeof(float)));
+
+    GPU_CHECK(hipMemcpy(d_a, h_a, a_count * sizeof(uint32_t), hipMemcpyHostToDevice));
+    GPU_CHECK(hipMemcpy(d_b, h_b, b_count * sizeof(uint32_t), hipMemcpyHostToDevice));
+    GPU_CHECK(hipMemcpy(d_c, h_c, cd_count * sizeof(float), hipMemcpyHostToDevice));
+    GPU_CHECK(hipMemset(d_d, 0, cd_count * sizeof(float)));
+
+    hipLaunchKernelGGL(smfmac_kernel,
+                       dim3(num_waves), dim3(wf_size), 0, 0,
+                       d_a, d_b, d_c, d_d, num_waves);
+    GPU_CHECK(hipGetLastError());
+    GPU_CHECK(hipDeviceSynchronize());
+
+    GPU_CHECK(hipMemcpy(h_d, d_d, cd_count * sizeof(float), hipMemcpyDeviceToHost));
+
+    const float EXPECTED = 32.0f;   /* K/2 products of 1.0*1.0 */
+    const float EPS      = 0.1f;
+
+    int pass = 1, checked = 0;
+    for (int t = 0; t < threads && pass; t++) {
+        for (int i = 0; i < CD_REGS; i++) {
+            float got = h_d[t * CD_REGS + i];
+            if (fabsf(got - EXPECTED) > EPS) {
+                fprintf(stderr, "FAIL t=%d acc[%d]: got %.3f expected %.3f\n",
+                        t, i, got, EXPECTED);
+                pass = 0; break;
+            }
+            checked++;
+        }
+    }
+
+    printf("v_smfmac_f32_32x32x64_fp8_fp8: checked %d values, expected %.1f\n",
+           checked, EXPECTED);
+    if (pass)
+        printf("  D[0]=%.1f D[last]=%.1f\n", h_d[0], h_d[cd_count - 1]);
+    printf("%s\n", pass ? "PASSED" : "FAILED");
+
+    GPU_CHECK(hipFree(d_a)); GPU_CHECK(hipFree(d_b));
+    GPU_CHECK(hipFree(d_c)); GPU_CHECK(hipFree(d_d));
+    free(h_a); free(h_b); free(h_c); free(h_d);
+    return pass ? 0 : 1;
+}

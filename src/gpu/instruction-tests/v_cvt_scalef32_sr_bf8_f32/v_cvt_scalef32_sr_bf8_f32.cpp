@@ -1,0 +1,33 @@
+/*
+ * HIP test for V_CVT_SCALEF32_SR_BF8_F32 (VOP3, stochastic-round scale-convert).
+ * gem5 (vop3_cvt.hh Inst_VOP3__V_CVT_SCALEF32_SR): src0=input f32, src1=i32
+ * seed, src2=f32 scale; writes the fp8 result into byte0 of dst (OPSEL[3:2]=0).
+ * With input +0.0 there are no dropped mantissa bits, so stochastic rounding is
+ * a no-op and the fp8 result is exactly 0 regardless of seed -> byte0 clears.
+ * Base only.
+ */
+#include <hip/hip_runtime.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#define GPU_CHECK(cmd) do{hipError_t e=(cmd);if(e!=hipSuccess){ \
+    fprintf(stderr,"HIP %s:%d %s\n",__FILE__,__LINE__,hipGetErrorString(e));exit(1);}}while(0)
+static const int N=256, BLOCK_SIZE=64;
+__global__ void kern(uint32_t*out,int n){
+    int i=blockIdx.x*blockDim.x+threadIdx.x; if(i>=n)return;
+    uint32_t s0=0u; int32_t s1=0; float s2=1.0f; uint32_t d=0xFFFFFFFFu;
+    __asm__ volatile("v_cvt_scalef32_sr_bf8_f32 %0, %1, %2, %3\n\t"
+        :"+v"(d):"v"(s0),"v"(s1),"v"(s2));
+    out[i]=d;
+}
+int main(void){
+    uint32_t*ho=(uint32_t*)malloc(N*4),*doo; GPU_CHECK(hipMalloc(&doo,N*4));
+    kern<<<N/BLOCK_SIZE,BLOCK_SIZE>>>(doo,N);
+    GPU_CHECK(hipGetLastError());GPU_CHECK(hipDeviceSynchronize());
+    GPU_CHECK(hipMemcpy(ho,doo,N*4,hipMemcpyDeviceToHost));
+    int pass=1;
+    for(int i=0;i<N;i++){ uint32_t b0=ho[i]&0xff; if(b0!=0){fprintf(stderr,"FAIL[%d] byte0=%02x full %08x\n",i,b0,ho[i]);pass=0;break;}}
+    if(pass)printf("out[0]=%08x byte0=%02x\n",ho[0],ho[0]&0xff);
+    printf("%s\n",pass?"PASSED":"FAILED");
+    return pass?0:1;
+}
